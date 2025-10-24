@@ -1,71 +1,77 @@
-import socket 
-import threading
+# import socket module
+from socket import *
+import sys  
+import datetime  
 
-HEADER = 64
-PORT = 5050
-# SERVER = "192.168.1.110"
+serverSocket = socket(AF_INET, SOCK_STREAM)
 
-SERVER = socket.gethostbyname(socket.gethostname())
-ADDR = (SERVER, PORT)
-FORMAT = 'utf-8'
-DISCONNECT_MESSAGE = "!DISCONNECT"
+# Prepare a server socket
+serverPort = 6789
+serverSocket.bind(('', serverPort))
+serverSocket.listen(1)
 
-server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-server.bind(ADDR)
+while True:
+    # Establishing the socket connection
+    print(f"'\nServer Started...{datetime.datetime.now()}")
+    print(f"Run the project on the following URL: http://127.0.0.1:{serverPort}")
+    connectionSocket, addr = serverSocket.accept()
+    print(f"[CLIENT CONNECTED] {addr} at {datetime.datetime.now()}")
 
-def handle_client(conn, addr):
-    print(f"[NEW CONNECTION] {addr} connected.")
+    try:
+        # Receiving request
+        message = connectionSocket.recv(1024).decode()
+        if not message:
+            print("[WARNING] Empty request received.")
+            connectionSocket.close()
+            continue
 
-    connected = True
-    while connected:
-        # Read exactly HEADER bytes
-        header = bytearray()
-        while len(header) < HEADER:
-            chunk = conn.recv(HEADER - len(header))
-            if not chunk:
-                connected = False
-                break
-            header.extend(chunk)
-        if not connected:
-            break
+        # Parse request line: e.g., "GET /HelloWorld.html HTTP/1.1"
+        filename = message.split()[1]
+        f = open(filename[1:], 'rb')
 
-        msg_length_str = bytes(header).decode(FORMAT).strip()
-        if not msg_length_str:
-            break
+        # Read file contents
+        outputdata = f.read()
+        f.close()
 
-        try:
-            msg_length = int(msg_length_str)
-        except ValueError:
-            print(f"[{addr}] Bad header (not an int): {msg_length_str!r}")
-            break
+        # Log file found
+        print(f"[FILE FOUND] '{filename[1:]}' served successfully at {datetime.datetime.now()}")
 
-        # Read exactly msg_length bytes
-        body = bytearray()
-        while len(body) < msg_length:
-            chunk = conn.recv(msg_length - len(body))  # FIX: recv (not rec)
-            if not chunk:
-                connected = False
-                break
-            body.extend(chunk)
-        if not connected:
-            break
+        # Send one HTTP header line into socket
+        header = (
+            "HTTP/1.1 200 OK\r\n"
+            "Content-Type: text/html\r\n"
+            f"Content-Length: {len(outputdata)}\r\n"
+            "Connection: close\r\n"
+            "\r\n"
+        )
+        connectionSocket.send(header.encode())
 
-        msg = bytes(body).decode(FORMAT)
-        if msg == DISCONNECT_MESSAGE:
-            connected = False
+        # Send the content of the requested file to the client
+        for i in range(0, len(outputdata)):
+            connectionSocket.send(outputdata[i:i+1])
 
-        print(f"[{addr}]  {msg}")
+        connectionSocket.send("\r\n".encode())
+        connectionSocket.close()
 
-    conn.close()
+    except IOError:
+        # Log 404 not found
+        print(f"[404 NOT FOUND] '{filename[1:]}' requested by {addr} at {datetime.datetime.now()}")
 
-def start():
-    server.listen()
-    print(f"[LISTENING] Service is listening on {SERVER}")
-    while True:
-        conn, addr = server.accept()
-        thread = threading.Thread(target=handle_client, args=(conn,addr))
-        thread.start()
-        print("[ACTIVE CONNECTIONS] " + str(threading.active_count() - 1))
+        body = (
+            "<html><head><title>404 Not Found</title></head>"
+            "<body><h1>404 Not Found</h1><p>The requested file was not found.</p></body></html>"
+        ).encode()
+        header = (
+            "HTTP/1.1 404 Not Found\r\n"
+            "Content-Type: text/html\r\n"
+            f"Content-Length: {len(body)}\r\n"
+            "Connection: close\r\n"
+            "\r\n"
+        )
+        connectionSocket.send(header.encode())
+        connectionSocket.send(body)
+        connectionSocket.close()
 
-print("[STARTING] server is starting...")
-start()
+# Clean up
+serverSocket.close()
+sys.exit()
